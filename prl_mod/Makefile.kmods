@@ -1,0 +1,56 @@
+# Parallels Tools for Linux
+#
+# Copyright (c) 1999-2015 Parallels International GmbH.
+# All rights reserved.
+# http://www.parallels.com
+
+first: compile
+
+PRL_ETH ?= prl_eth/pvmnet
+PRL_TG ?= prl_tg/Toolgate/Guest/Linux/prl_tg
+PRL_TG_PWN ?= prl_tg_pwn/Toolgate/Guest/Linux/prl_tg
+PRL_FS ?= prl_fs/SharedFolders/Guest/Linux/prl_fs
+PRL_FREEZE ?= prl_fs_freeze/Snapshot/Guest/Linux/prl_freeze
+PRL_VID ?= prl_vid/Video/Guest/Linux/kmod
+PRL_NOTIFIER ?= prl_notifier/Installation/lnx/prl_notifier
+
+KVER ?= $(shell uname -r)
+KERNEL_DIR ?= /lib/modules/$(KVER)/build
+
+# Get version from version.h in kernel source directory
+ifeq "$(wildcard $(KERNEL_DIR)/include/linux/version.h)" ""
+	VERSION_H_PATH ?= $(KERNEL_DIR)/include/generated/uapi/linux/version.h
+else
+	VERSION_H_PATH ?= $(KERNEL_DIR)/include/linux/version.h
+endif
+H := \#
+VERSION_CODE := $(shell awk '\
+		/^[[:space:]]*$(H)define[[:space:]]+LINUX_VERSION_CODE[[:space:]]+[0-9]+/\
+		{ v = $$3 } END { print v }' $(VERSION_H_PATH))
+
+ifndef PRL_VID_SKIP
+	ifeq ($(shell if [ $(VERSION_CODE) -ge 330240 -a -d $(PRL_VID) ]; then echo y; fi),y)
+		PRL_VID_SKIP = 1
+	endif
+endif
+
+
+# Get compiler version used for kernel build.
+KERNEL_CC_VER := $(shell cat /proc/version | grep -o -e 'cc \+version \+[0-9,\.]\+' | grep -o -e '[0-9,\.]\+')
+ifneq ($(findstring $(KERNEL_CC_VER), $(shell $(CC) --version | grep -e '^g*cc')),$(KERNEL_CC_VER))
+  $(info Searching for compiler $(KERNEL_CC_VER) due to version mismatch.)
+  $(foreach f,$(wildcard /usr/bin/gcc-[0-9]*),$(if $(filter $(KERNEL_CC_VER),$(shell $(f) --version | grep -e '^g*cc')),$(eval CC := $(f))))
+endif
+$(info Will use compiler CC="$(CC)".)
+$(info Compiler version "$(shell $(CC) --version | grep '^g*cc')")
+
+PRL_TG_SYMVERS := $(shell readlink -f ${PRL_TG})/Module.symvers
+
+compile:
+	cd ${PRL_TG} && make CC=$(CC)
+	cp -f ${PRL_TG}/*.symvers ${PRL_TG_PWN} ||:
+	cd ${PRL_TG_PWN} && make CC=$(CC) KBUILD_EXTRA_SYMBOLS=${PRL_TG_SYMVERS}
+
+clean:
+	cd ${PRL_TG} && make clean
+	cd ${PRL_TG_PWN} && make clean
